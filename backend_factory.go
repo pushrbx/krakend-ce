@@ -1,6 +1,7 @@
 package krakend
 
 import (
+	"github.com/devopsfaith/krakend/encoding"
 	cb "github.com/devopsfaith/krakend-circuitbreaker/gobreaker/proxy"
 	httpcache "github.com/devopsfaith/krakend-httpcache"
 	"github.com/devopsfaith/krakend-martian"
@@ -31,10 +32,39 @@ func NewBackendFactory(logger logging.Logger, metricCollector *metrics.Metrics) 
 		}
 		return opencensus.HTTPRequestExecutor(clientFactory)
 	}
-	backendFactory := martian.NewConfiguredBackendFactory(logger, requestExecutorFactory)
+	backendFactory := NewCustomMartianBackendFactory(logger, requestExecutorFactory)
 	backendFactory = juju.BackendFactory(backendFactory)
 	backendFactory = cb.BackendFactory(backendFactory)
 	backendFactory = metricCollector.BackendFactory("backend", backendFactory)
 	backendFactory = opencensus.BackendFactory(backendFactory)
 	return backendFactory
+}
+
+func NewCustomMartianBackendFactory(logger logging.Logger, ref func(*config.Backend) client.HTTPRequestExecutor) proxy.BackendFactory {
+	return func(remote *config.Backend) proxy.Proxy {
+		re := ref(remote)
+		result, ok := martian.ConfigGetter(remote.ExtraConfig).(martian.Result)
+		if !ok {
+			return NewCustomHTTPProxyWithHTTPExecutor(remote, re, remote.Decoder)
+		}
+		switch result.Err {
+		case nil:
+			return NewCustomHTTPProxyWithHTTPExecutor(remote, martian.HTTPRequestExecutor(result.Result, re), remote.Decoder)
+		case martian.ErrEmptyValue:
+			return NewCustomHTTPProxyWithHTTPExecutor(remote, re, remote.Decoder)
+		default:
+			logger.Error(result, remote.ExtraConfig)
+			return NewCustomHTTPProxyWithHTTPExecutor(remote, re, remote.Decoder)
+		}
+	}
+}
+
+func NewCustomHTTPProxyWithHTTPExecutor(remote *config.Backend, re client.HTTPRequestExecutor, dec encoding.Decoder) proxy.Proxy {
+	if remote.Encoding == encoding.NOOP {
+		return proxy.NewHTTPProxyDetailed(remote, re, client.NoOpHTTPStatusHandler, proxy.NoOpHTTPResponseParser)
+	}
+
+	ef := proxy.NewEntityFormatter(remote)
+	rp := proxy.DefaultHTTPResponseParserFactory(proxy.HTTPResponseParserConfig{dec, ef})
+	return proxy.NewHTTPProxyDetailed(remote, re, RestlessHTTPStatusHandler, rp)
 }
