@@ -5,7 +5,6 @@ import (
 
 	amqp "github.com/devopsfaith/krakend-amqp"
 	cel "github.com/devopsfaith/krakend-cel"
-	"github.com/devopsfaith/krakend/encoding"
 	cb "github.com/devopsfaith/krakend-circuitbreaker/gobreaker/proxy"
 	httpcache "github.com/devopsfaith/krakend-httpcache"
 	"github.com/devopsfaith/krakend-martian"
@@ -14,13 +13,16 @@ import (
 	opencensus "github.com/devopsfaith/krakend-opencensus"
 	juju "github.com/devopsfaith/krakend-ratelimit/juju/proxy"
 	"github.com/devopsfaith/krakend/config"
+	"github.com/devopsfaith/krakend/encoding"
 	"github.com/devopsfaith/krakend/logging"
 	"github.com/devopsfaith/krakend/proxy"
 	"github.com/devopsfaith/krakend/transport/http/client"
+	"github.com/pushrbx/krakend-strapi-auth"
 )
 
 // NewBackendFactory creates a BackendFactory by stacking all the available middlewares:
 // - oauth2 client credentials
+// - strapi authentication
 // - http cache
 // - martian
 // - amqp
@@ -39,6 +41,8 @@ func NewBackendFactoryWithContext(ctx context.Context, logger logging.Logger, me
 		var clientFactory client.HTTPClientFactory
 		if _, ok := cfg.ExtraConfig[oauth2client.Namespace]; ok {
 			clientFactory = oauth2client.NewHTTPClient(cfg)
+		} else if _, ok := cfg.ExtraConfig[strapi_auth_client.Namespace]; ok {
+			clientFactory = strapi_auth_client.NewHTTPClient(cfg)
 		} else {
 			clientFactory = httpcache.NewHTTPClient(cfg)
 		}
